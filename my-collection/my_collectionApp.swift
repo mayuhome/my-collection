@@ -9,9 +9,16 @@ import SwiftUI
 
 @main
 struct my_collectionApp: App {
+    // 首次启动标志
+    @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore = false
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if hasLaunchedBefore {
+                ContentView()
+            } else {
+                OnboardingView(isOnboardingCompleted: $hasLaunchedBefore)
+            }
         }
     }
 }
