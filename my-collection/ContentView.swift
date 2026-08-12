@@ -10,6 +10,10 @@ import SwiftUI
 struct ContentView: View {
     // 数据管理器
     @ObservedObject private var dataManager = DataManager.shared
+    // 随机浏览状态
+    @State private var randomItem: CollectionItem? = nil
+    @State private var randomIndex: Int? = nil
+    @State private var showAlert = false
     
     // 分类状态
     @State private var selectedCategory: String = "全部"
@@ -70,10 +74,38 @@ struct ContentView: View {
                 addButton
             }
             .navigationTitle("我的收藏")
+            // 隐藏的随机浏览导航链接
+            .background {
+                NavigationLink(
+                    isActive: Binding(
+                        get: { randomItem != nil },
+                        set: { if !$0 { randomItem = nil; randomIndex = nil } }
+                    ),
+                    destination: {
+                        if let item = randomItem, let index = randomIndex {
+                            DetailView(item: item, index: index)
+                        }
+                    },
+                    label: { EmptyView() }
+                )
+            }
+            .alert("提示", isPresented: $showAlert) {
+                Button("确定", role: .cancel) { }
+            } message: {
+                Text("还没有藏品，先去添加一些吧")
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("🎲 随便看看") {
-                        // 后续实现随机浏览功能
+                        // 检查是否有藏品
+                        guard !dataManager.items.isEmpty else {
+                            showAlert = true
+                            return
+                        }
+                        // 随机选择一个藏品
+                        let index = Int.random(in: 0..<dataManager.items.count)
+                        randomIndex = index
+                        randomItem = dataManager.items[index]
                     }
                 }
             }
