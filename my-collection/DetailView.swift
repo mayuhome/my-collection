@@ -104,34 +104,51 @@ struct DetailView: View {
     // MARK: - 顶部导航栏
     
     private var topNavBar: some View {
-        HStack {
-            // 返回按钮
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title2)
+        VStack(spacing: 0) {
+            HStack {
+                // 返回按钮
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(12)
+                }
+                
+                Spacer()
+                
+                // 当前位置指示器
+                Text("\(currentIndex + 1) / \(totalCount)")
+                    .font(.headline)
                     .foregroundColor(.white)
-                    .padding(12)
+                
+                Spacer()
+                
+                // 旋转按钮
+                Button {
+                    // 切换横竖屏
+                    toggleOrientation()
+                } label: {
+                    Image(systemName: "rotate.right")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(12)
+                }
             }
+            .padding(.horizontal)
+            .padding(.top, 8)
             
-            Spacer()
-            
-            // 当前位置指示器
-            Text("\(currentIndex + 1) / \(totalCount)")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            Spacer()
-            
-            // 占位，保持对称
-            Image(systemName: "chevron.left")
-                .font(.title2)
-                .foregroundColor(.clear)
-                .padding(12)
+            // 藏品名称显示
+            if let item = currentItem, let name = item.name, !name.isEmpty {
+                Text(name)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
         .background(Color.black.opacity(0.5))
     }
     
@@ -267,19 +284,25 @@ struct DetailView: View {
                                 }
                             }
                             
-                            // 删除按钮
-                            Button {
-                                startDeleteProcess()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "trash")
-                                    Text("删除此藏品")
+                            // 删除按钮（更小，不易误触）
+                            HStack {
+                                Spacer()
+                                Button {
+                                    startDeleteProcess()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "trash")
+                                            .font(.caption)
+                                        Text("删除")
+                                            .font(.caption)
+                                    }
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.red.opacity(0.1))
+                                    .cornerRadius(16)
                                 }
-                                .foregroundColor(.red)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.red.opacity(0.1))
-                                .cornerRadius(10)
+                                .buttonStyle(.plain)
                             }
                             .padding(.top, 20)
                         }
@@ -419,6 +442,19 @@ struct DetailView: View {
         // 重置状态
         isDeleting = false
         deletedIndex = nil
+    }
+    
+    // 切换横竖屏
+    private func toggleOrientation() {
+        // 获取当前窗口场景
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        
+        // 切换方向
+        let currentOrientation = windowScene.interfaceOrientation
+        let newOrientation: UIInterfaceOrientationMask = currentOrientation == .portrait ? .landscape : .portrait
+        
+        // 设置新方向
+        windowScene.requestGeometryUpdate(.init(interfaceOrientations: newOrientation))
     }
 }
 
