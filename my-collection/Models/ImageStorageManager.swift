@@ -31,7 +31,7 @@ final class ImageStorageManager: ObservableObject {
         createDirectoriesIfNeeded()
     }
     
-    // MARK: - Directory Management
+    // MARK: - 目录管理
     
     private func createDirectoriesIfNeeded() {
         createDirectoryIfNeeded(at: imagesDirectory)
@@ -43,110 +43,99 @@ final class ImageStorageManager: ObservableObject {
         do {
             try fileManager.createDirectory(at: url, withIntermediateDirectories: true, attributes: nil)
         } catch {
-            print("[ImageStorageManager] Failed to create directory \(url.lastPathComponent): \(error.localizedDescription)")
+            print("[ImageStorageManager] 创建目录失败 \(url.lastPathComponent): \(error.localizedDescription)")
         }
     }
     
-    // MARK: - Image Saving
+    // MARK: - 单张保存
     
     func saveImage(_ image: UIImage, withName fileName: String) -> Bool {
-        guard let jpegData = image.jpegData(compressionQuality: 0.8) else {
-            print("[ImageStorageManager] Failed to convert image to JPEG data")
-            return false
-        }
+        guard let jpegData = image.jpegData(compressionQuality: 0.8) else { return false }
         let fileURL = imagesDirectory.appendingPathComponent(fileName)
         do {
             try jpegData.write(to: fileURL)
             return true
         } catch {
-            print("[ImageStorageManager] Failed to save image \(fileName): \(error.localizedDescription)")
+            print("[ImageStorageManager] 保存图片失败 \(fileName): \(error.localizedDescription)")
             return false
         }
     }
     
-    // MARK: - Image Loading
+    // MARK: - 批量保存（返回成功保存的文件名列表）
+    
+    func saveImages(_ images: [UIImage]) -> [String] {
+        var savedNames: [String] = []
+        for image in images {
+            let fileName = "\(UUID().uuidString).jpg"
+            if saveImage(image, withName: fileName) {
+                // 同时生成缩略图
+                _ = generateThumbnail(for: image, withName: fileName)
+                savedNames.append(fileName)
+            }
+        }
+        return savedNames
+    }
+    
+    // MARK: - 单张加载
     
     func loadImage(withName fileName: String) -> UIImage? {
         let fileURL = imagesDirectory.appendingPathComponent(fileName)
-        guard fileManager.fileExists(atPath: fileURL.path) else {
-            print("[ImageStorageManager] Image file not found: \(fileName)")
-            return nil
-        }
-        guard let data = try? Data(contentsOf: fileURL) else {
-            print("[ImageStorageManager] Failed to load image data for \(fileName)")
-            return nil
-        }
+        guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
         return UIImage(data: data)
     }
     
-    // MARK: - Image Deletion
+    // MARK: - 批量加载
     
-    func deleteImage(withName fileName: String) -> Bool {
-        let imageFileURL = imagesDirectory.appendingPathComponent(fileName)
-        let thumbnailFileURL = thumbnailsDirectory.appendingPathComponent(fileName)
-        var success = true
-        
-        // Delete original image
-        if fileManager.fileExists(atPath: imageFileURL.path) {
-            do {
-                try fileManager.removeItem(at: imageFileURL)
-            } catch {
-                print("[ImageStorageManager] Failed to delete image \(fileName): \(error.localizedDescription)")
-                success = false
-            }
-        }
-        
-        // Delete thumbnail
-        if fileManager.fileExists(atPath: thumbnailFileURL.path) {
-            do {
-                try fileManager.removeItem(at: thumbnailFileURL)
-            } catch {
-                print("[ImageStorageManager] Failed to delete thumbnail \(fileName): \(error.localizedDescription)")
-                success = false
-            }
-        }
-        
-        return success
+    func loadImages(withNames fileNames: [String]) -> [UIImage] {
+        fileNames.compactMap { loadImage(withName: $0) }
     }
     
-    // MARK: - Thumbnail Generation
+    // MARK: - 单张删除
+    
+    func deleteImage(withName fileName: String) {
+        let imageURL = imagesDirectory.appendingPathComponent(fileName)
+        let thumbURL = thumbnailsDirectory.appendingPathComponent(fileName)
+        try? fileManager.removeItem(at: imageURL)
+        try? fileManager.removeItem(at: thumbURL)
+    }
+    
+    // MARK: - 批量删除
+    
+    func deleteImages(_ fileNames: [String]) {
+        for name in fileNames {
+            deleteImage(withName: name)
+        }
+    }
+    
+    // MARK: - 缩略图生成
     
     func generateThumbnail(for image: UIImage, withName fileName: String) -> Bool {
-        let thumbnailSize = CGSize(width: 200, height: 200)
-        let renderer = UIGraphicsImageRenderer(size: thumbnailSize)
+        let size = CGSize(width: 200, height: 200)
+        let renderer = UIGraphicsImageRenderer(size: size)
         let thumbnail = renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: thumbnailSize))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
-        guard let thumbnailData = thumbnail.jpegData(compressionQuality: 0.8) else {
-            print("[ImageStorageManager] Failed to convert thumbnail to JPEG data")
-            return false
-        }
-        let thumbnailURL = thumbnailsDirectory.appendingPathComponent(fileName)
+        guard let data = thumbnail.jpegData(compressionQuality: 0.8) else { return false }
+        let url = thumbnailsDirectory.appendingPathComponent(fileName)
         do {
-            try thumbnailData.write(to: thumbnailURL)
+            try data.write(to: url)
             return true
         } catch {
-            print("[ImageStorageManager] Failed to save thumbnail \(fileName): \(error.localizedDescription)")
             return false
         }
     }
     
-    // MARK: - Thumbnail Loading
+    // MARK: - 缩略图加载
     
     func loadThumbnail(withName fileName: String) -> UIImage? {
-        let thumbnailURL = thumbnailsDirectory.appendingPathComponent(fileName)
-        guard fileManager.fileExists(atPath: thumbnailURL.path) else {
-            print("[ImageStorageManager] Thumbnail not found: \(fileName)")
-            return nil
-        }
-        guard let data = try? Data(contentsOf: thumbnailURL) else {
-            print("[ImageStorageManager] Failed to load thumbnail data for \(fileName)")
-            return nil
-        }
+        let url = thumbnailsDirectory.appendingPathComponent(fileName)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        guard let data = try? Data(contentsOf: url) else { return nil }
         return UIImage(data: data)
     }
     
-    // MARK: - Convenience Methods
+    // MARK: - 便捷方法
     
     func saveImageAndGenerateThumbnail(_ image: UIImage, withName fileName: String) -> Bool {
         let saved = saveImage(image, withName: fileName)

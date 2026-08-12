@@ -273,7 +273,7 @@ struct CollectionItemCell: View {
     // 加载缩略图
     private func loadThumbnail() {
         Task { @MainActor in
-            let loadedImage = ImageStorageManager.shared.loadThumbnail(withName: item.imageFileName)
+            let loadedImage = item.imageFileNames.first.flatMap { ImageStorageManager.shared.loadThumbnail(withName: $0) }
             self.thumbnail = loadedImage
         }
     }

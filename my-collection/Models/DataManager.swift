@@ -43,12 +43,14 @@ final class DataManager: ObservableObject {
         items = load()
     }
 
-    // MARK: - Public API
+    // MARK: - 添加藏品
 
     func addItem(_ item: CollectionItem) {
         items.append(item)
         save()
     }
+
+    // MARK: - 更新藏品
 
     func updateItem(_ item: CollectionItem) {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
@@ -58,28 +60,32 @@ final class DataManager: ObservableObject {
         save()
     }
 
+    // MARK: - 删除藏品（含图片文件清理）
+
     func deleteItem(id: String) {
-        // Find the item to get its image file name
-        if let item = items.first(where: { $0.id == id }) {
-            // Delete associated image and thumbnail
-            let imageStorage = ImageStorageManager.shared
-            imageStorage.deleteImage(withName: item.imageFileName)
-        }
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        // 先删图片文件
+        ImageStorageManager.shared.deleteImages(item.imageFileNames)
+        // 再删记录
         items.removeAll { $0.id == id }
         save()
     }
 
-    // MARK: - Persistence
+    // MARK: - 按 ID 获取
+
+    func getItem(by id: String) -> CollectionItem? {
+        items.first { $0.id == id }
+    }
+
+    // MARK: - 持久化
 
     private func load() -> [CollectionItem] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return []
-        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
         do {
             let data = try Data(contentsOf: fileURL)
             return try decoder.decode([CollectionItem].self, from: data)
         } catch {
-            print("[DataManager] Failed to load data.json: \(error.localizedDescription)")
+            print("[DataManager] 加载失败: \(error.localizedDescription)")
             return []
         }
     }
@@ -89,7 +95,7 @@ final class DataManager: ObservableObject {
             let data = try encoder.encode(items)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            print("[DataManager] Failed to save data.json: \(error.localizedDescription)")
+            print("[DataManager] 保存失败: \(error.localizedDescription)")
         }
     }
 }

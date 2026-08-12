@@ -9,7 +9,7 @@ import Foundation
 
 struct CollectionItem: Codable, Identifiable {
     var id: String
-    var imageFileName: String
+    var imageFileNames: [String]   // 多图支持
     var name: String?
     var category: [String]?
     var source: String?
@@ -20,7 +20,7 @@ struct CollectionItem: Codable, Identifiable {
 
     init(
         id: String = UUID().uuidString,
-        imageFileName: String,
+        imageFileNames: [String] = [],
         name: String? = nil,
         category: [String]? = nil,
         source: String? = nil,
@@ -30,7 +30,7 @@ struct CollectionItem: Codable, Identifiable {
         modifyDate: Date? = nil
     ) {
         self.id = id
-        self.imageFileName = imageFileName
+        self.imageFileNames = imageFileNames
         self.name = name
         self.category = category
         self.source = source
