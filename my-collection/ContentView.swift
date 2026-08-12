@@ -118,8 +118,13 @@ struct ContentView: View {
     private var collectionGrid: some View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 16) {
-                ForEach(filteredItems) { item in
-                    CollectionItemCell(item: item)
+                ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
+                    if let originalIndex = dataManager.items.firstIndex(where: { $0.id == item.id }) {
+                        NavigationLink(destination: DetailView(item: item, index: originalIndex)) {
+                            CollectionItemCell(item: item)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
             .padding(.horizontal, 16)
