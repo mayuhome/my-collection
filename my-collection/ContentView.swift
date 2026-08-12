@@ -170,10 +170,7 @@ struct ContentView: View {
     // MARK: - 悬浮添加按钮
     
     private var addButton: some View {
-        Button {
-            // 跳转到添加页面（暂未实现）
-            print("添加新藏品")
-        } label: {
+        NavigationLink(destination: AddItemView()) {
             Image(systemName: "plus")
                 .font(.title2)
                 .fontWeight(.bold)
@@ -183,6 +180,7 @@ struct ContentView: View {
                 .clipShape(Circle())
                 .shadow(color: .blue.opacity(0.3), radius: 8, y: 4)
         }
+        .buttonStyle(.plain)
         .padding(.bottom, 20)
     }
 }
