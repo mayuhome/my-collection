@@ -1,0 +1,1126 @@
+//
+//  DetailView.swift
+//  my-collection
+//
+//  Created by Ma Jade on 2026/8/12.
+//
+
+import SwiftUI
+import UIKit
+
+struct DetailView: View {
+    // MARK: - 属性
+    
+    let initialItem: CollectionItem
+    let initialIndex: Int
+    
+    @ObservedObject private var dataManager = DataManager.shared
+    @Environment(\.dismiss) private var dismiss
+    
+    // 当前显示的索引
+    @State private var currentIndex: Int
+    
+    // 详情卡片状态
+    @State private var showDetailCard = false
+    @State private var dragOffset: CGFloat = 0
+    
+    // 删除状态
+    @State private var isDeleting = false
+    @State private var deletedIndex: Int? = nil
+    @State private var showUndoBanner = false
+    @State private var undoTimer: Timer? = nil
+    @State private var undoCountdown = 5
+    
+    // 图片缓存
+    @State private var loadedImages: [String: UIImage] = [:]
+    
+    // 分享功能状态
+    @State private var showEditSheet = false
+    @State private var showPosterView = false
+    @State private var posterText = ""
+    @State private var posterImage: UIImage? = nil
+    @State private var isGeneratingPoster = false
+    @State private var showSaveAlert = false
+    @State private var saveAlertMessage = ""
+    
+    // MARK: - 初始化
+    
+    init(item: CollectionItem, index: Int) {
+        self.initialItem = item
+        self.initialIndex = index
+        _currentIndex = State(initialValue: index)
+    }
+    
+    // MARK: - 计算属性
+    
+    /// 当前藏品
+    private var currentItem: CollectionItem? {
+        guard currentIndex >= 0 && currentIndex < dataManager.items.count else {
+            return nil
+        }
+        return dataManager.items[currentIndex]
+    }
+    
+    /// 总数量
+    private var totalCount: Int {
+        dataManager.items.count
+    }
+    
+    /// 是否有上一张
+    private var hasPrevious: Bool {
+        currentIndex > 0
+    }
+    
+    /// 是否有下一张
+    private var hasNext: Bool {
+        currentIndex < totalCount - 1
+    }
+    
+    // MARK: - 主视图
+    
+    var body: some View {
+        ZStack {
+            // 背景
+            Color.black.ignoresSafeArea()
+            
+            // 主内容
+            VStack(spacing: 0) {
+                // 顶部导航栏
+                topNavBar
+                
+                // 图片展示区
+                imageGallery
+                
+                // 底部提示条
+                bottomHint
+            }
+            
+            // 详情卡片（从底部滑出）
+            detailCard
+            
+            // 撤销横幅
+            undoBanner
+        }
+        .navigationBarHidden(true)
+        .onAppear {
+            loadInitialImage()
+        }
+        .onChange(of: currentIndex) { newIndex in
+            loadImageForIndex(newIndex)
+        }
+        .sheet(isPresented: $showEditSheet) {
+            EditSheet(
+                text: $posterText,
+                onCancel: { showEditSheet = false },
+                onGenerate: {
+                    showEditSheet = false
+                    generatePoster()
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showPosterView) {
+            PosterView(
+                image: posterImage,
+                text: posterText,
+                isGenerating: $isGeneratingPoster,
+                onSave: { savePosterToAlbum() },
+                onShare: { sharePoster() },
+                onDismiss: { showPosterView = false }
+            )
+        }
+        .alert("保存结果", isPresented: $showSaveAlert) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(saveAlertMessage)
+        }
+    }
+    
+    // MARK: - 顶部导航栏
+    
+    private var topNavBar: some View {
+        VStack(spacing: 0) {
+            HStack {
+                // 返回按钮
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(12)
+                }
+                
+                Spacer()
+                
+                // 当前位置指示器
+                Text("\(currentIndex + 1) / \(totalCount)")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
+                Spacer()
+                
+                // 旋转按钮
+                Button {
+                    // 切换横竖屏
+                    toggleOrientation()
+                } label: {
+                    Image(systemName: "rotate.right")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(12)
+                }
+                
+                // 分享按钮
+                Button {
+                    showEditSheet = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.title2)
+                        .foregroundColor(.white)
+                        .padding(12)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 8)
+            
+            // 藏品名称显示
+            if let item = currentItem, let name = item.name, !name.isEmpty {
+                Text(name)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .background(Color.black.opacity(0.5))
+    }
+    
+    // MARK: - 图片画廊
+    
+    private var imageGallery: some View {
+        TabView(selection: $currentIndex) {
+            ForEach(Array(dataManager.items.enumerated()), id: \.element.id) { index, item in
+                ZoomableImageView(
+                    image: loadedImages[item.imageFileName],
+                    isLoading: loadedImages[item.imageFileName] == nil
+                )
+                .tag(index)
+            }
+        }
+        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+        .opacity(isDeleting && deletedIndex == currentIndex ? 0.5 : 1.0)
+        .animation(.default, value: isDeleting)
+    }
+    
+    // MARK: - 底部提示条
+    
+    private var bottomHint: some View {
+        VStack(spacing: 8) {
+            // 拖拽手柄
+            RoundedRectangle(cornerRadius: 2.5)
+                .fill(Color.white.opacity(0.5))
+                .frame(width: 40, height: 5)
+            
+            Text("轻轻上拉查看详情")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .padding(.bottom, 20)
+        .frame(maxWidth: .infinity)
+        .background(Color.black.opacity(0.3))
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    let translation = value.translation.height
+                    if translation < 0 {
+                        dragOffset = max(translation, -300)
+                    }
+                }
+                .onEnded { value in
+                    if value.translation.height < -50 {
+                        withAnimation(.spring()) {
+                            showDetailCard = true
+                            dragOffset = 0
+                        }
+                    } else {
+                        withAnimation(.spring()) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
+        .offset(y: dragOffset)
+    }
+    
+    // MARK: - 详情卡片
+    
+    private var detailCard: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            
+            VStack(spacing: 0) {
+                // 拖拽手柄
+                RoundedRectangle(cornerRadius: 2.5)
+                    .fill(Color.gray.opacity(0.5))
+                    .frame(width: 40, height: 5)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                if value.translation.height > 0 {
+                                    dragOffset = value.translation.height
+                                }
+                            }
+                            .onEnded { value in
+                                if value.translation.height > 50 {
+                                    withAnimation(.spring()) {
+                                        showDetailCard = false
+                                        dragOffset = 0
+                                    }
+                                } else {
+                                    withAnimation(.spring()) {
+                                        dragOffset = 0
+                                    }
+                                }
+                            }
+                    )
+                
+                // 详情内容
+                if let item = currentItem {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            // 名称
+                            if let name = item.name, !name.isEmpty {
+                                Text(name)
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                            }
+                            
+                            // 分类标签
+                            if let categories = item.category, !categories.isEmpty {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(categories, id: \.self) { category in
+                                        Text(category)
+                                            .font(.caption)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(Color.blue.opacity(0.2))
+                                            .foregroundColor(.blue)
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                            }
+                            
+                            // 详细信息
+                            Group {
+                                if let price = item.price, !price.isEmpty {
+                                    DetailRow(title: "价格", value: "¥\(price)", icon: "yensign.circle")
+                                }
+                                
+                                if let source = item.source, !source.isEmpty {
+                                    DetailRow(title: "来源", value: source, icon: "gift")
+                                }
+                                
+                                if let location = item.location, !location.isEmpty {
+                                    DetailRow(title: "位置", value: location, icon: "location")
+                                }
+                            }
+                            
+                            // 删除按钮（更小，不易误触）
+                            HStack {
+                                Spacer()
+                                Button {
+                                    startDeleteProcess()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "trash")
+                                            .font(.caption)
+                                        Text("删除")
+                                            .font(.caption)
+                                    }
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color.red.opacity(0.1))
+                                    .cornerRadius(16)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.top, 20)
+                        }
+                        .padding()
+                    }
+                }
+            }
+            .background(Color(.systemBackground))
+            .cornerRadius(20, corners: [.topLeft, .topRight])
+            .shadow(color: .black.opacity(0.2), radius: 10, y: -5)
+            .offset(y: showDetailCard ? 0 : UIScreen.main.bounds.height * 0.6)
+            .animation(.spring(), value: showDetailCard)
+        }
+        .edgesIgnoringSafeArea(.bottom)
+    }
+    
+    // MARK: - 撤销横幅
+    
+    private var undoBanner: some View {
+        VStack {
+            Spacer()
+            
+            if showUndoBanner {
+                HStack {
+                    Text("已删除，点击撤销")
+                        .foregroundColor(.white)
+                    
+                    Spacer()
+                    
+                    Button {
+                        undoDelete()
+                    } label: {
+                        Text("撤销 (\(undoCountdown))")
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.blue)
+                            .cornerRadius(20)
+                    }
+                }
+                .padding()
+                .background(Color.gray.opacity(0.9))
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .padding(.bottom, 40)
+                .transition(.move(edge: .bottom))
+                .animation(.spring(), value: showUndoBanner)
+            }
+        }
+    }
+    
+    // MARK: - 图片加载
+    
+    private func loadInitialImage() {
+        loadImageForIndex(initialIndex)
+    }
+    
+    private func loadImageForIndex(_ index: Int) {
+        guard index >= 0 && index < dataManager.items.count else { return }
+        let item = dataManager.items[index]
+        
+        guard loadedImages[item.imageFileName] == nil else { return }
+        
+        Task { @MainActor in
+            if let image = ImageStorageManager.shared.loadImage(withName: item.imageFileName) {
+                loadedImages[item.imageFileName] = image
+            }
+        }
+    }
+    
+    // MARK: - 删除功能
+    
+    private func startDeleteProcess() {
+        guard let item = currentItem else { return }
+        
+        // 关闭详情卡片
+        withAnimation(.spring()) {
+            showDetailCard = false
+        }
+        
+        // 设置删除状态
+        isDeleting = true
+        deletedIndex = currentIndex
+        
+        // 显示撤销横幅
+        withAnimation {
+            showUndoBanner = true
+        }
+        
+        // 开始倒计时
+        undoCountdown = 5
+        undoTimer?.invalidate()
+        undoTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+            if undoCountdown > 0 {
+                undoCountdown -= 1
+            } else {
+                timer.invalidate()
+                performDelete()
+            }
+        }
+    }
+    
+    private func undoDelete() {
+        // 取消删除
+        undoTimer?.invalidate()
+        isDeleting = false
+        deletedIndex = nil
+        
+        withAnimation {
+            showUndoBanner = false
+        }
+    }
+    
+    private func performDelete() {
+        guard var deletedIndex: Int? = deletedIndex else { return }
+        let item = dataManager.items[deletedIndex ?? 0]
+        
+        // 删除图片文件
+        ImageStorageManager.shared.deleteImage(withName: item.imageFileName)
+        
+        // 删除数据记录
+        dataManager.deleteItem(id: item.id)
+        
+        // 更新界面
+        withAnimation {
+            showUndoBanner = false
+        }
+        
+        // 切换到下一张或返回
+        if totalCount == 0 {
+            dismiss()
+        } else if currentIndex >= totalCount {
+            currentIndex = totalCount - 1
+        }
+        
+        // 重置状态
+        isDeleting = false
+        deletedIndex = nil
+    }
+    
+    // 切换横竖屏
+    private func toggleOrientation() {
+        // 获取当前窗口场景
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        
+        // 切换方向
+        let currentOrientation = windowScene.interfaceOrientation
+        let newOrientation: UIInterfaceOrientationMask = currentOrientation == .portrait ? .landscape : .portrait
+        
+        // 设置新方向
+        windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: newOrientation))
+    }
+    
+    // MARK: - 海报生成功能
+    
+    private func generatePoster() {
+        guard let item = currentItem else { return }
+        
+        // 加载图片
+        guard let image = loadedImages[item.imageFileName] else {
+            saveAlertMessage = "图片加载失败，无法生成海报"
+            showSaveAlert = true
+            return
+        }
+        
+        isGeneratingPoster = true
+        showPosterView = true
+        
+        // 生成海报图片
+        DispatchQueue.global(qos: .userInitiated).async {
+            let posterSize = CGSize(width: 1080, height: 1440) // 4:3 比例
+            let renderer = UIGraphicsImageRenderer(size: posterSize)
+            
+            let poster = renderer.image { context in
+                // 绘制背景
+                let backgroundColor = UIColor(red: 0.96, green: 0.95, blue: 0.92, alpha: 1.0) // #F5F2EB
+                backgroundColor.setFill()
+                context.fill(CGRect(origin: .zero, size: posterSize))
+                
+                // 计算图片区域（留白20pt）
+                let imageRect = CGRect(x: 40, y: 40, width: posterSize.width - 80, height: posterSize.height - 80)
+                
+                // 绘制图片
+                image.draw(in: imageRect)
+                
+                // 绘制画框装饰（四个角的L形角标）
+                let cornerLength: CGFloat = 40
+                let cornerThickness: CGFloat = 4
+                let cornerColor = UIColor(red: 0.6, green: 0.4, blue: 0.2, alpha: 1.0) // 深棕色
+                cornerColor.setStroke()
+                
+                let path = UIBezierPath()
+                path.lineWidth = cornerThickness
+                
+                // 左上角
+                path.move(to: CGPoint(x: imageRect.minX, y: imageRect.minY + cornerLength))
+                path.addLine(to: CGPoint(x: imageRect.minX, y: imageRect.minY))
+                path.addLine(to: CGPoint(x: imageRect.minX + cornerLength, y: imageRect.minY))
+                
+                // 右上角
+                path.move(to: CGPoint(x: imageRect.maxX - cornerLength, y: imageRect.minY))
+                path.addLine(to: CGPoint(x: imageRect.maxX, y: imageRect.minY))
+                path.addLine(to: CGPoint(x: imageRect.maxX, y: imageRect.minY + cornerLength))
+                
+                // 左下角
+                path.move(to: CGPoint(x: imageRect.minX, y: imageRect.maxY - cornerLength))
+                path.addLine(to: CGPoint(x: imageRect.minX, y: imageRect.maxY))
+                path.addLine(to: CGPoint(x: imageRect.minX + cornerLength, y: imageRect.maxY))
+                
+                // 右下角
+                path.move(to: CGPoint(x: imageRect.maxX - cornerLength, y: imageRect.maxY))
+                path.addLine(to: CGPoint(x: imageRect.maxX, y: imageRect.maxY))
+                path.addLine(to: CGPoint(x: imageRect.maxX, y: imageRect.maxY - cornerLength))
+                
+                path.stroke()
+                
+                // 绘制文字背景（毛玻璃效果模拟）
+                if !posterText.isEmpty {
+                    let textBackgroundHeight: CGFloat = 120
+                    let textBackgroundRect = CGRect(
+                        x: imageRect.minX,
+                        y: imageRect.maxY - textBackgroundHeight,
+                        width: imageRect.width,
+                        height: textBackgroundHeight
+                    )
+                    
+                    // 半透明背景
+                    let textBackgroundColor = UIColor.black.withAlphaComponent(0.4)
+                    textBackgroundColor.setFill()
+                    context.fill(textBackgroundRect)
+                    
+                    // 绘制文字
+                    let displayText = posterText.count <= 10 ? "  ·  \(posterText)  ·  " : posterText
+                    
+                    let paragraphStyle = NSMutableParagraphStyle()
+                    paragraphStyle.alignment = .center
+                    
+                    let textAttributes: [NSAttributedString.Key: Any] = [
+                        .font: UIFont(name: "Times New Roman", size: 48) ?? UIFont.systemFont(ofSize: 48, weight: .bold),
+                        .foregroundColor: UIColor.white,
+                        .paragraphStyle: paragraphStyle,
+                        .shadow: {
+                            let shadow = NSShadow()
+                            shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
+                            shadow.shadowOffset = CGSize(width: 2, height: 2)
+                            shadow.shadowBlurRadius = 4
+                            return shadow
+                        }()
+                    ]
+                    
+                    let textRect = CGRect(
+                        x: textBackgroundRect.minX + 20,
+                        y: textBackgroundRect.minY + 20,
+                        width: textBackgroundRect.width - 40,
+                        height: textBackgroundRect.height - 40
+                    )
+                    
+                    displayText.draw(in: textRect, withAttributes: textAttributes)
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.posterImage = poster
+                self.isGeneratingPoster = false
+            }
+        }
+    }
+    
+    private func savePosterToAlbum() {
+        guard let image = posterImage else {
+            saveAlertMessage = "海报图片不存在"
+            showSaveAlert = true
+            return
+        }
+        
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        saveAlertMessage = "海报已保存到相册"
+        showSaveAlert = true
+    }
+    
+    private func sharePoster() {
+        guard let image = posterImage else { return }
+        
+        let activityVC = UIActivityViewController(
+            activityItems: [image],
+            applicationActivities: nil
+        )
+        
+        // 获取当前视图控制器
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootViewController = windowScene.windows.first?.rootViewController else {
+            return
+        }
+        
+        rootViewController.present(activityVC, animated: true)
+    }
+}
+
+// MARK: - 可缩放图片视图
+
+struct ZoomableImageView: View {
+    let image: UIImage?
+    let isLoading: Bool
+    
+    @State private var scale: CGFloat = 1.0
+    @State private var lastScale: CGFloat = 1.0
+    
+    var body: some View {
+        GeometryReader { geometry in
+            if let image = image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .scaleEffect(scale)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                let delta = value / lastScale
+                                lastScale = value
+                                scale *= delta
+                            }
+                            .onEnded { value in
+                                lastScale = 1.0
+                                if scale < 1.0 {
+                                    withAnimation(.spring()) {
+                                        scale = 1.0
+                                    }
+                                } else if scale > 3.0 {
+                                    withAnimation(.spring()) {
+                                        scale = 3.0
+                                    }
+                                }
+                            }
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring()) {
+                            if scale > 1.0 {
+                                scale = 1.0
+                            } else {
+                                scale = 2.0
+                            }
+                        }
+                    }
+            } else if isLoading {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                Image(systemName: "photo")
+                    .font(.system(size: 50))
+                    .foregroundColor(.gray)
+            }
+        }
+    }
+}
+
+// MARK: - 详情行组件
+
+struct DetailRow: View {
+    let title: String
+    let value: String
+    let icon: String
+    
+    var body: some View {
+        HStack(alignment: .top) {
+            Image(systemName: icon)
+                .foregroundColor(.blue)
+                .frame(width: 24)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                Text(value)
+                    .font(.body)
+            }
+        }
+    }
+}
+
+// MARK: - 圆角扩展
+
+extension View {
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCorner(radius: radius, corners: corners))
+    }
+}
+
+struct RoundedCorner: Shape {
+    var radius: CGFloat = .infinity
+    var corners: UIRectCorner = .allCorners
+    
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
+
+// MARK: - 预览
+
+#Preview {
+    DetailView(
+        item: CollectionItem(
+            imageFileName: "preview.jpg",
+            name: "示例藏品",
+            category: ["手办", "限量版"],
+            source: "淘宝",
+            price: "199.99",
+            location: "书架"
+        ),
+        index: 0
+    )
+}
+
+// MARK: - 编辑弹窗
+
+struct EditSheet: View {
+    @Binding var text: String
+    let onCancel: () -> Void
+    let onGenerate: () -> Void
+    
+    private let maxCharacters = 20
+    
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                // 标题
+                Text("为藏品写一句介绍")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .padding(.top, 8)
+                
+                // 文本输入框
+                ZStack(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("输入你想展示的文字，如：\'清乾隆 青花瓷瓶\'")
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 8)
+                    }
+                    
+                    TextEditor(text: $text)
+                        .frame(minHeight: 120)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
+                        .onChange(of: text) { newValue in
+                            // 限制字符数
+                            if newValue.count > maxCharacters {
+                                text = String(newValue.prefix(maxCharacters))
+                            }
+                        }
+                }
+                
+                // 字符计数
+                HStack {
+                    Spacer()
+                    Text("\(text.count) / \(maxCharacters)")
+                        .font(.caption)
+                        .foregroundColor(text.count >= maxCharacters ? .red : .secondary)
+                }
+                
+                Spacer()
+                
+                // 按钮区域
+                HStack(spacing: 16) {
+                    Button {
+                        onCancel()
+                    } label: {
+                        Text("取消")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(.systemGray5))
+                            .cornerRadius(12)
+                    }
+                    
+                    Button {
+                        onGenerate()
+                    } label: {
+                        HStack {
+                            Image(systemName: "photo.on.rectangle.angled")
+                            Text("生成海报")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                    }
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding()
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+// MARK: - 海报预览视图
+
+struct PosterView: View {
+    let image: UIImage?
+    let text: String
+    @Binding var isGenerating: Bool
+    let onSave: () -> Void
+    let onShare: () -> Void
+    let onDismiss: () -> Void
+    
+    @State private var showSaveAlert = false
+    @State private var saveAlertMessage = ""
+    
+    var body: some View {
+        ZStack {
+            // 背景
+            Color.black.ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // 顶部栏
+                topBar
+                
+                // 海报内容
+                ScrollView(.vertical, showsIndicators: false) {
+                    posterCanvas
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                }
+                
+                // 底部操作栏
+                bottomBar
+            }
+            
+            // 加载指示器
+            if isGenerating {
+                loadingOverlay
+            }
+        }
+        .alert("提示", isPresented: $showSaveAlert) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text(saveAlertMessage)
+        }
+    }
+    
+    // MARK: - 顶部栏
+    
+    private var topBar: some View {
+        HStack {
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.title3)
+                    .foregroundColor(.white)
+                    .padding(12)
+            }
+            
+            Spacer()
+            
+            Text("展览海报")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            Spacer()
+            
+            // 占位，保持对称
+            Image(systemName: "xmark")
+                .font(.title3)
+                .foregroundColor(.clear)
+                .padding(12)
+        }
+        .background(Color.black.opacity(0.8))
+    }
+    
+    // MARK: - 海报画布
+    
+    private var posterCanvas: some View {
+        GeometryReader { geometry in
+            let canvasWidth = geometry.size.width
+            let canvasHeight = canvasWidth * 4.0 / 3.0
+            
+            ZStack {
+                // 背景画布 - 米白色
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
+                
+                // 图片区域
+                if let image = image {
+                    let padding: CGFloat = 20
+                    
+                    ZStack {
+                        // 核心图片
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(
+                                width: canvasWidth - padding * 2,
+                                height: canvasHeight - padding * 2
+                            )
+                            .clipped()
+                        
+                        // 画框角标
+                        frameCorners(
+                            size: CGSize(
+                                width: canvasWidth - padding * 2,
+                                height: canvasHeight - padding * 2
+                            )
+                        )
+                        
+                        // 悬浮文字
+                        if !text.isEmpty {
+                            VStack {
+                                Spacer()
+                                overlayText
+                            }
+                        }
+                    }
+                    .frame(
+                        width: canvasWidth - padding * 2,
+                        height: canvasHeight - padding * 2
+                    )
+                } else {
+                    // 加载占位
+                    ProgressView()
+                        .tint(.gray)
+                }
+            }
+            .frame(width: canvasWidth, height: canvasHeight)
+        }
+        .aspectRatio(3.0 / 4.0, contentMode: .fit)
+    }
+    
+    // MARK: - 画框角标
+    
+    private func frameCorners(size: CGSize) -> some View {
+        let cornerLength: CGFloat = 30
+        let cornerThickness: CGFloat = 3
+        let color = Color(red: 0.6, green: 0.4, blue: 0.2) // 深棕色
+        
+        return ZStack {
+            // 左上角
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: cornerLength))
+                path.addLine(to: CGPoint(x: 0, y: 0))
+                path.addLine(to: CGPoint(x: cornerLength, y: 0))
+            }
+            .stroke(color, lineWidth: cornerThickness)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            
+            // 右上角
+            Path { path in
+                path.move(to: CGPoint(x: size.width - cornerLength, y: 0))
+                path.addLine(to: CGPoint(x: size.width, y: 0))
+                path.addLine(to: CGPoint(x: size.width, y: cornerLength))
+            }
+            .stroke(color, lineWidth: cornerThickness)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            
+            // 左下角
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: size.height - cornerLength))
+                path.addLine(to: CGPoint(x: 0, y: size.height))
+                path.addLine(to: CGPoint(x: cornerLength, y: size.height))
+            }
+            .stroke(color, lineWidth: cornerThickness)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+            
+            // 右下角
+            Path { path in
+                path.move(to: CGPoint(x: size.width - cornerLength, y: size.height))
+                path.addLine(to: CGPoint(x: size.width, y: size.height))
+                path.addLine(to: CGPoint(x: size.width, y: size.height - cornerLength))
+            }
+            .stroke(color, lineWidth: cornerThickness)
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
+        }
+    }
+    
+    // MARK: - 悬浮文字
+    
+    private var overlayText: some View {
+        let displayText = text.count <= 10 ? "  \u{00B7}  \(text)  \u{00B7}  " : text
+        
+        return Text(displayText)
+            .font(.system(size: 24, weight: .bold, design: .serif))
+            .foregroundColor(.white)
+            .shadow(color: .black.opacity(0.6), radius: 4, x: 1, y: 2)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.6)
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+    }
+    
+    // MARK: - 底部操作栏
+    
+    private var bottomBar: some View {
+        HStack(spacing: 16) {
+            // 保存到相册
+            Button {
+                UIImageWriteToSavedPhotosAlbum(image!, nil, nil, nil)
+                saveAlertMessage = "海报已保存到相册"
+                showSaveAlert = true
+            } label: {
+                HStack {
+                    Image(systemName: "photo.on.rectangle")
+                    Text("保存到相册")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Color(.systemGray))
+                .cornerRadius(12)
+            }
+            
+            // 分享
+            Button {
+                onShare()
+            } label: {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("分享")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Color.blue)
+                .cornerRadius(12)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color.black.opacity(0.8))
+    }
+    
+    // MARK: - 加载遮罩
+    
+    private var loadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(.white)
+                
+                Text("正在生成海报...")
+                    .font(.headline)
+                    .foregroundColor(.white)
+            }
+            .padding(32)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+            )
+        }
+    }
+}
+

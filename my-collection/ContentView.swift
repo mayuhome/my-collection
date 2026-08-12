@@ -82,8 +82,8 @@ struct ContentView: View {
                         set: { if !$0 { randomItem = nil; randomIndex = nil } }
                     ),
                     destination: {
-                        if let item = randomItem, let index = randomIndex {
-                            DetailView(item: item, index: index)
+                        if let index = randomIndex {
+                            DetailView(startIndex: index)
                         }
                     },
                     label: { EmptyView() }
@@ -152,7 +152,7 @@ struct ContentView: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(Array(filteredItems.enumerated()), id: \.element.id) { index, item in
                     if let originalIndex = dataManager.items.firstIndex(where: { $0.id == item.id }) {
-                        NavigationLink(destination: DetailView(item: item, index: originalIndex)) {
+                        NavigationLink(destination: DetailView(startIndex: originalIndex)) {
                             CollectionItemCell(item: item)
                         }
                         .buttonStyle(.plain)
