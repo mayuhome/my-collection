@@ -35,11 +35,19 @@ struct DetailView: View {
     @State private var posterContent = ""
     @State private var showPoster = false
     @State private var posterImage: UIImage?
+    @State private var posterReady = false
+    
+    @State private var allImages: [ImageEntry] = []   // 快照，初始化后不再变化
     
     init(startIndex: Int) {
         self.startIndex = startIndex
-        // 计算该藏品第一张图在 allImages 中的位置
         let items = DataManager.shared.items
+        // 构建图片快照
+        let snapshot = items.enumerated().flatMap { idx, item in
+            item.imageFileNames.map { ImageEntry(itemIndex: idx, fileName: $0) }
+        }
+        _allImages = State(initialValue: snapshot)
+        // 计算该藏品第一张图在快照中的位置
         var offset = 0
         for i in 0..<startIndex {
             offset += items[i].imageFileNames.count
@@ -48,13 +56,6 @@ struct DetailView: View {
     }
     
     private var items: [CollectionItem] { dataManager.items }
-    
-    /// 所有图片平铺列表
-    private var allImages: [ImageEntry] {
-        items.enumerated().flatMap { idx, item in
-            item.imageFileNames.map { ImageEntry(itemIndex: idx, fileName: $0) }
-        }
-    }
     
     /// 当前图片所属藏品下标
     private var currentItemIndex: Int {
@@ -101,6 +102,12 @@ struct DetailView: View {
                 title: posterTitle,
                 content: posterContent
             )
+        }
+        .onChange(of: posterReady) { ready in
+            if ready {
+                showPoster = true
+                posterReady = false
+            }
         }
     }
     
@@ -229,9 +236,8 @@ struct DetailView: View {
         guard let img = img else { return }
         loadedImages[fileName] = img
         posterImage = img
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            showPoster = true
-        }
+        // 下一帧再触发弹出，确保 posterImage 已写入状态
+        DispatchQueue.main.async { posterReady = true }
     }
 }
 
