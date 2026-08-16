@@ -76,6 +76,12 @@ struct ItemFormView: View {
     
     // MARK: - 图片区
     
+    private let imageGridColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10)
+    ]
+    
     private var imageSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -85,55 +91,79 @@ struct ItemFormView: View {
                     .font(.caption).foregroundColor(.secondary)
             }
             
-            // 图片缩略图滚动区
-            if totalImageCount > 0 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        // 已有图片
-                        ForEach(existingFileNames, id: \.self) { fileName in
-                            thumbnailView(
-                                image: existingThumbnails[fileName],
-                                isNew: false,
-                                onDelete: { deleteExistingImage(fileName) },
-                                onTap: {
-                                    if let img = existingThumbnails[fileName] {
-                                        previewImage = img; showPreview = true
-                                    }
-                                }
-                            )
-                        }
-                        // 新增图片
-                        ForEach(Array(newImages.enumerated()), id: \.offset) { _, img in
-                            thumbnailView(
-                                image: img,
-                                isNew: true,
-                                onDelete: { newImages.removeAll { $0 === img } },
-                                onTap: { previewImage = img; showPreview = true }
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // 添加图片按钮
-            if canAddMore {
+            if totalImageCount == 0 {
+                // 空状态：居中正方形
                 Button { showImagePicker = true } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "photo.on.rectangle")
-                        Text("点击添加图片（可多选）")
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 36))
+                            .foregroundColor(.blue.opacity(0.5))
+                        Text("添加图片")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.secondary)
                     }
-                    .font(.subheadline)
-                    .foregroundColor(.blue)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(width: 200, height: 200)
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
-                            .foregroundColor(.blue.opacity(0.4))
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.systemGray6))
                     )
-                    .background(Color.blue.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                            .foregroundColor(.blue.opacity(0.25))
+                    )
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+            } else {
+                // 已有图片：方形网格
+                LazyVGrid(columns: imageGridColumns, spacing: 10) {
+                    // 已有图片
+                    ForEach(existingFileNames, id: \.self) { fileName in
+                        thumbnailView(
+                            image: existingThumbnails[fileName],
+                            isNew: false,
+                            onDelete: { deleteExistingImage(fileName) },
+                            onTap: {
+                                if let img = existingThumbnails[fileName] {
+                                    previewImage = img; showPreview = true
+                                }
+                            }
+                        )
+                    }
+                    // 新增图片
+                    ForEach(Array(newImages.enumerated()), id: \.offset) { _, img in
+                        thumbnailView(
+                            image: img,
+                            isNew: true,
+                            onDelete: { newImages.removeAll { $0 === img } },
+                            onTap: { previewImage = img; showPreview = true }
+                        )
+                    }
+                    // 添加按钮（方形，嵌入网格）
+                    if canAddMore {
+                        Button { showImagePicker = true } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.title2.weight(.medium))
+                                    .foregroundColor(.blue.opacity(0.6))
+                                Text("添加")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .aspectRatio(1, contentMode: .fit)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+                                    .foregroundColor(.blue.opacity(0.35))
+                            )
+                            .background(Color.blue.opacity(0.03))
+                            .cornerRadius(10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
             
             if !canSave {
@@ -157,37 +187,39 @@ struct ItemFormView: View {
         }
     }
     
-    // 单个缩略图
+    // 单个缩略图（方形，自适应网格）
     private func thumbnailView(image: UIImage?, isNew: Bool, onDelete: @escaping () -> Void, onTap: @escaping () -> Void) -> some View {
         ZStack(alignment: .topTrailing) {
             if let img = image {
                 Image(uiImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 80, height: 80)
+                    .aspectRatio(1, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color.gray.opacity(0.15))
-                    .frame(width: 80, height: 80)
+                    .aspectRatio(1, contentMode: .fit)
                     .overlay(ProgressView().scaleEffect(0.6))
             }
             
             // 新增角标
             if isNew {
-                VStack {
-                    Spacer()
-                    HStack {
+                GeometryReader { geo in
+                    VStack {
                         Spacer()
-                        Text("新")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.green)
-                            .cornerRadius(4)
+                        HStack {
+                            Spacer()
+                            Text("新")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Color.green)
+                                .cornerRadius(4)
+                        }
                     }
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
-                .frame(width: 80, height: 80)
             }
             
             // 删除按钮

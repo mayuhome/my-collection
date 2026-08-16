@@ -204,8 +204,11 @@ struct DetailView: View {
     
     private func preparePoster() {
         guard let item = items[safe: currentIndex],
-              let fileName = item.imageFileNames.first,
-              let img = loadedImages[fileName] else { return }
+              let fileName = item.imageFileNames.first else { return }
+        // 如果缓存中没有（异步加载尚未完成），同步加载一次
+        let img = loadedImages[fileName] ?? ImageStorageManager.shared.loadImage(withName: fileName)
+        guard let img = img else { return }
+        loadedImages[fileName] = img
         posterImage = img
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             showPoster = true
