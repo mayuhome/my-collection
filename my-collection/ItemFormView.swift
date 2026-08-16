@@ -187,21 +187,26 @@ struct ItemFormView: View {
         }
     }
     
-    // 单个缩略图（方形，自适应网格）
+    // 单个缩略图（正方形，自适应网格列宽）
     private func thumbnailView(image: UIImage?, isNew: Bool, onDelete: @escaping () -> Void, onTap: @escaping () -> Void) -> some View {
         ZStack(alignment: .topTrailing) {
-            if let img = image {
-                Image(uiImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.gray.opacity(0.15))
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay(ProgressView().scaleEffect(0.6))
-            }
+            // 用 Color.clear 撑出正方形区域
+            Color.clear
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(
+                    Group {
+                        if let img = image {
+                            Image(uiImage: img)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        } else {
+                            Color.gray.opacity(0.15)
+                                .overlay(ProgressView().scaleEffect(0.6))
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             
             // 新增角标
             if isNew {
