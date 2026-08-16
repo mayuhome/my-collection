@@ -29,6 +29,7 @@ struct ItemFormView: View {
     
     // ---- 配置 ----
     let isEditMode: Bool
+    let currentItemID: String?       // 当前正在编辑的藏品 ID（用于分类关联检查）
     let maxImages: Int = 9
     let onSave: () -> Void
     let onCancel: () -> Void
@@ -41,6 +42,18 @@ struct ItemFormView: View {
     @State private var showPreview = false
     @State private var isExpanded = false
     
+    // 自定义分类输入
+    @State private var customCategoryInput = ""
+    // 分类删除确认
+    @State private var showDeleteCategoryConfirm = false
+    @State private var pendingDeleteCategory: String?
+    // 分类被占用提示
+    @State private var showCategoryInUseAlert = false
+    @State private var categoryInUseName = ""
+    // 分类编辑
+    @State private var showEditCategoryAlert = false
+    @State private var editingCategoryOld = ""
+    @State private var editingCategoryNew = ""
     // 已有图片的缩略图缓存
     @State private var existingThumbnails: [String: UIImage] = [:]
     
@@ -285,32 +298,109 @@ struct ItemFormView: View {
     
     private var categorySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("分类（选填，可多选）").font(.headline)
+            Text("分类（选填）").font(.headline)
             
-            FlowLayout(spacing: 10) {
-                ForEach(allCategories, id: \.self) { cat in
-                    let selected = selectedCategories.contains(cat)
+            // 已选分类（可删除、可编辑）
+            if !selectedCategories.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(selectedCategories, id: \.self) { cat in
+                        HStack(spacing: 6) {
+                            Text(cat)
+                                .font(.subheadline)
+                            // 编辑按钮
+                            Button {
+                                editingCategoryOld = cat
+                                editingCategoryNew = cat
+                                showEditCategoryAlert = true
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            // 删除按钮
+                            Button {
+                                attemptDeleteCategory(cat)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+            
+            // 预设分类快捷选择
+            FlowLayout(spacing: 8) {
+                ForEach(allCategories.filter { !selectedCategories.contains($0) }, id: \.self) { cat in
                     Button {
                         toggleCategory(cat)
                     } label: {
                         Text(cat)
                             .font(.subheadline)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .background(selected ? Color.blue : Color.clear)
-                            .foregroundColor(selected ? .white : .primary)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .foregroundColor(.primary)
                             .overlay(
-                                Capsule().stroke(selected ? Color.clear : Color.gray.opacity(0.3), lineWidth: 1)
+                                Capsule().stroke(Color.gray.opacity(0.3), lineWidth: 1)
                             )
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
+            
+            // 自定义分类输入
+            HStack(spacing: 8) {
+                TextField("输入自定义分类", text: $customCategoryInput)
+                    .textFieldStyle(.plain)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(8)
+                    .onSubmit { addCustomCategory() }
+                
+                Button { addCustomCategory() } label: {
+                    Text("添加")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(customCategoryInput.trimmingCharacters(in: .whitespaces).isEmpty ? Color.gray : Color.blue)
+                        .cornerRadius(8)
+                }
+                .disabled(customCategoryInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
         }
         .padding()
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        // 分类删除确认
+        .alert("移除分类", isPresented: $showDeleteCategoryConfirm) {
+            Button("取消", role: .cancel) { pendingDeleteCategory = nil }
+            Button("移除", role: .destructive) {
+                if let cat = pendingDeleteCategory {
+                    toggleCategory(cat)
+                }
+                pendingDeleteCategory = nil
+            }
+        } message: {
+            Text("确定要从当前藏品中移除「\(pendingDeleteCategory ?? "")」分类吗？")
+        }
+        // 分类被占用提示
+        .alert("无法删除", isPresented: $showCategoryInUseAlert) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("「\(categoryInUseName)」分类下还有其他藏品关联，请先修改相关藏品的分类后再删除。")
+        }
+        // 分类编辑
+        .alert("编辑分类", isPresented: $showEditCategoryAlert) {
+            TextField("分类名称", text: $editingCategoryNew)
+            Button("取消", role: .cancel) {}
+            Button("确定") { renameCategory(from: editingCategoryOld, to: editingCategoryNew) }
+        } message: {
+            Text("修改分类名称将同步更新所有使用该分类的藏品")
+        }
     }
     
     // MARK: - 补充信息
@@ -397,6 +487,60 @@ struct ItemFormView: View {
             selectedCategories.remove(at: idx)
         } else {
             selectedCategories.append(cat)
+        }
+    }
+    
+    private func addCustomCategory() {
+        let cat = customCategoryInput.trimmingCharacters(in: .whitespaces)
+        guard !cat.isEmpty else { return }
+        guard !selectedCategories.contains(cat) else {
+            customCategoryInput = ""
+            return
+        }
+        selectedCategories.append(cat)
+        customCategoryInput = ""
+    }
+    
+    /// 检查分类是否被其他藏品使用
+    private func isCategoryUsedByOthers(_ cat: String) -> Bool {
+        DataManager.shared.items.contains { item in
+            item.id != currentItemID && (item.category?.contains(cat) ?? false)
+        }
+    }
+    
+    /// 尝试删除分类（带关联检查 + 二次确认）
+    private func attemptDeleteCategory(_ cat: String) {
+        if isCategoryUsedByOthers(cat) {
+            categoryInUseName = cat
+            showCategoryInUseAlert = true
+        } else {
+            pendingDeleteCategory = cat
+            showDeleteCategoryConfirm = true
+        }
+    }
+    
+    /// 重命名分类（同步更新所有关联藏品）
+    private func renameCategory(from oldName: String, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        guard trimmed != oldName else { return }
+        
+        // 更新当前选中列表
+        if let idx = selectedCategories.firstIndex(of: oldName) {
+            selectedCategories[idx] = trimmed
+        }
+        
+        // 同步更新所有使用该分类的藏品
+        let dataManager = DataManager.shared
+        for item in dataManager.items {
+            guard var cats = item.category, cats.contains(oldName) else { continue }
+            if let i = cats.firstIndex(of: oldName) {
+                cats[i] = trimmed
+            }
+            var updated = item
+            updated.category = cats
+            updated.modifyDate = Date()
+            dataManager.updateItem(updated)
         }
     }
     

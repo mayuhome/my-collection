@@ -44,6 +44,7 @@ struct AddItemView: View {
                     price: $price,
                     location: $location,
                     isEditMode: false,
+                    currentItemID: nil,
                     onSave: { save() },
                     onCancel: { dismiss() },
                     onDelete: nil

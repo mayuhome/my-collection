@@ -69,6 +69,7 @@ struct EditItemView: View {
                     price: $price,
                     location: $location,
                     isEditMode: true,
+                    currentItemID: item.id,
                     onSave: { save() },
                     onCancel: { cancelTapped() },
                     onDelete: { deleteItem() }

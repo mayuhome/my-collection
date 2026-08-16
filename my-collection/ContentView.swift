@@ -17,7 +17,21 @@ struct ContentView: View {
     
     // 分类状态
     @State private var selectedCategory: String = "全部"
-    private let categories = ["全部", "手办", "邮票", "钱币", "书籍"]
+    
+    /// 从所有藏品中提取不重复的分类，保持稳定顺序
+    private var categories: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for item in dataManager.items {
+            guard let cats = item.category else { continue }
+            for cat in cats {
+                if seen.insert(cat).inserted {
+                    result.append(cat)
+                }
+            }
+        }
+        return ["全部"] + result.sorted()
+    }
     
     // 网格布局配置
     private let columns = [

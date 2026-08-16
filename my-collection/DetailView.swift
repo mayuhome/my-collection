@@ -8,14 +8,22 @@
 import SwiftUI
 import UIKit
 
+// MARK: - 图片条目（关联到所属藏品）
+
+private struct ImageEntry: Identifiable {
+    let id = UUID()
+    let itemIndex: Int      // 在 dataManager.items 中的下标
+    let fileName: String
+}
+
 struct DetailView: View {
     
-    let startIndex: Int
+    let startIndex: Int         // 藏品下标（外部传入）
     
     @ObservedObject private var dataManager = DataManager.shared
     @Environment(\.dismiss) private var dismiss
     
-    @State private var currentIndex: Int
+    @State private var currentIndex: Int        // 在 allImages 中的下标
     @State private var loadedImages: [String: UIImage] = [:]
     
     // 编辑
@@ -30,29 +38,41 @@ struct DetailView: View {
     
     init(startIndex: Int) {
         self.startIndex = startIndex
-        _currentIndex = State(initialValue: startIndex)
+        // 计算该藏品第一张图在 allImages 中的位置
+        let items = DataManager.shared.items
+        var offset = 0
+        for i in 0..<startIndex {
+            offset += items[i].imageFileNames.count
+        }
+        _currentIndex = State(initialValue: offset)
     }
     
     private var items: [CollectionItem] { dataManager.items }
     
-    // 当前藏品所有图片文件名
-    private var currentFileNames: [String] {
-        items[safe: currentIndex]?.imageFileNames ?? []
+    /// 所有图片平铺列表
+    private var allImages: [ImageEntry] {
+        items.enumerated().flatMap { idx, item in
+            item.imageFileNames.map { ImageEntry(itemIndex: idx, fileName: $0) }
+        }
+    }
+    
+    /// 当前图片所属藏品下标
+    private var currentItemIndex: Int {
+        guard currentIndex >= 0, currentIndex < allImages.count else { return 0 }
+        return allImages[currentIndex].itemIndex
     }
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            if items.isEmpty {
+            if allImages.isEmpty {
                 emptyState
             } else {
-                // 图片幻灯片
+                // 图片幻灯片（按单张图片翻页）
                 TabView(selection: $currentIndex) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                        // 每个藏品可能有多张图片，这里展示第一张
-                        // （如需支持藏品内多图切换，可进一步拆分）
-                        ZoomableImage(image: loadedImages[item.imageFileNames.first ?? ""])
+                    ForEach(Array(allImages.enumerated()), id: \.element.id) { idx, entry in
+                        ZoomableImage(image: loadedImages[entry.fileName])
                             .tag(idx)
                     }
                 }
@@ -123,7 +143,7 @@ struct DetailView: View {
                 }
                 
                 // 页码
-                Text("\(currentIndex + 1)/\(items.count)")
+                Text("\(currentIndex + 1)/\(allImages.count)")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.6))
             }
@@ -135,7 +155,7 @@ struct DetailView: View {
                            startPoint: .top, endPoint: .bottom)
         )
         .sheet(isPresented: $showEditSheet) {
-            if let item = items[safe: currentIndex] {
+            if let item = items[safe: currentItemIndex] {
                 EditItemView(item: item)
             }
         }
@@ -145,7 +165,7 @@ struct DetailView: View {
     
     private var bottomBar: some View {
         HStack {
-            if let name = items[safe: currentIndex]?.name, !name.isEmpty {
+            if let name = items[safe: currentItemIndex]?.name, !name.isEmpty {
                 Text(name)
                     .font(.subheadline)
                     .foregroundColor(.white.opacity(0.8))
@@ -177,15 +197,15 @@ struct DetailView: View {
     
     private func preloadImages() {
         for offset in -1...1 {
-            let idx = startIndex + offset
-            guard idx >= 0, idx < items.count else { continue }
+            let idx = currentIndex + offset
+            guard idx >= 0, idx < allImages.count else { continue }
             loadImage(for: idx)
         }
     }
     
     private func loadImage(for index: Int) {
-        guard index >= 0, index < items.count else { return }
-        guard let fileName = items[index].imageFileNames.first else { return }
+        guard index >= 0, index < allImages.count else { return }
+        let fileName = allImages[index].fileName
         guard loadedImages[fileName] == nil else { return }
         Task { @MainActor in
             loadedImages[fileName] = ImageStorageManager.shared.loadImage(withName: fileName)
@@ -203,9 +223,8 @@ struct DetailView: View {
     // MARK: - 海报
     
     private func preparePoster() {
-        guard let item = items[safe: currentIndex],
-              let fileName = item.imageFileNames.first else { return }
-        // 如果缓存中没有（异步加载尚未完成），同步加载一次
+        guard currentIndex >= 0, currentIndex < allImages.count else { return }
+        let fileName = allImages[currentIndex].fileName
         let img = loadedImages[fileName] ?? ImageStorageManager.shared.loadImage(withName: fileName)
         guard let img = img else { return }
         loadedImages[fileName] = img
@@ -219,7 +238,7 @@ struct DetailView: View {
 // MARK: - 安全下标
 
 extension Array {
-    subscript(safe index: Int) -> Element? {
+    subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
     }
 }
